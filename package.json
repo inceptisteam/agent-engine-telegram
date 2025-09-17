@@ -1,0 +1,21 @@
+{
+  "name": "telegram-multi-agents",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "body-parser": "^2.2.0",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "mongodb": "^6.19.0",
+    "mongoose": "^8.3.2",
+    "node-telegram-bot-api": "^0.66.0",
+    "openai": "^5.20.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}

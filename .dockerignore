@@ -1,0 +1,6 @@
+dist
+.git
+Dockerfile
+docker-compose.yml
+.env
+.idea
