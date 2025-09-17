@@ -231,14 +231,14 @@ async function startServer() {
     }
 
 
-    // Función para manejar el proceso de registro (corregida)
+    // Función para manejar el proceso de registro (con más logs)
     async function handleRegistrationProcess(clientConfig, collection, conversationsCollection, chatId, userName, userMessage, userSession) {
     try {
         let reply = "";
         let registrationStep = userSession?.registrationStep ?? REGISTRATION_STEPS.NONE;
         let updateData = {};
 
-        console.log(`📝 Proceso de registro - Paso: ${registrationStep}, Sesión existente: ${!!userSession}`);
+        console.log(`📝 Proceso de registro - Paso: ${registrationStep}, Mensaje: "${userMessage}", Sesión existente: ${!!userSession}`);
 
         switch (registrationStep) {
         case REGISTRATION_STEPS.NONE:
@@ -250,6 +250,7 @@ async function startServer() {
             registrationStep: REGISTRATION_STEPS.ASK_NAME,
             lastActivity: new Date()
             };
+            console.log(`🆕 Nuevo registro iniciado - Avanzando a ASK_NAME`);
             break;
 
         case REGISTRATION_STEPS.ASK_NAME:
@@ -260,6 +261,7 @@ async function startServer() {
             registrationStep: REGISTRATION_STEPS.ASK_EMAIL,
             lastActivity: new Date()
             };
+            console.log(`📛 Nombre recibido: ${userMessage} - Avanzando a ASK_EMAIL`);
             break;
 
         case REGISTRATION_STEPS.ASK_EMAIL:
@@ -268,6 +270,7 @@ async function startServer() {
             if (!emailRegex.test(userMessage)) {
             reply = "Por favor, ingresa un correo electrónico válido.";
             updateData = { lastActivity: new Date() };
+            console.log(`❌ Email inválido: ${userMessage} - Permaneciendo en ASK_EMAIL`);
             } else {
             // Registro completado
             const finalUserName = userSession.userName || userName;
@@ -279,6 +282,7 @@ async function startServer() {
                 registeredAt: new Date(),
                 lastActivity: new Date()
             };
+            console.log(`✅ Registro completado - Email: ${userMessage} - Avanzando a COMPLETED`);
             }
             break;
 
@@ -290,6 +294,7 @@ async function startServer() {
             registrationStep: REGISTRATION_STEPS.ASK_NAME,
             lastActivity: new Date()
             };
+            console.log(`🔁 Paso desconocido (${registrationStep}) - Reiniciando a ASK_NAME`);
             break;
         }
 
@@ -318,10 +323,12 @@ async function startServer() {
         });
 
         // Actualizar o insertar la sesión del usuario
-        if (userSession) {
+        if (userSession && userSession.chatId) {
+        console.log(`💾 Actualizando sesión existente - ChatId: ${chatId}`);
         await collection.updateOne({ chatId }, { $set: updateData });
         } else {
         // Crear nueva sesión si no existe
+        console.log(`💾 Creando nueva sesión - ChatId: ${chatId}`);
         await collection.insertOne({
             chatId,
             ...updateData,
@@ -330,6 +337,7 @@ async function startServer() {
         }
 
         // Enviar respuesta usando la función mejorada
+        console.log(`📤 Enviando respuesta: ${reply.substring(0, 50)}...`);
         await sendTelegramMessage(clientConfig.token, chatId, reply);
 
     } catch (error) {
@@ -405,31 +413,32 @@ async function startServer() {
       }
     });
 
+
     // --- Webhook de Telegram para cada cliente ---
     app.post("/webhook/:clientId", async (req, res) => {
-      const clientId = req.params.clientId;
-      const clientConfig = clientConfigMap.get(clientId);
+    const clientId = req.params.clientId;
+    const clientConfig = clientConfigMap.get(clientId);
 
-      console.log(`📨 Webhook recibido para cliente: ${clientId}`);
+    console.log(`📨 Webhook recibido para cliente: ${clientId}`);
 
-      // Validación de cliente y token
-      if (!clientConfig || !clientConfig.token) {
+    // Validación de cliente y token
+    if (!clientConfig || !clientConfig.token) {
         console.error(`❌ Cliente no autorizado o no válido: ${clientId}`);
         return res.status(401).send("Cliente no autorizado o no válido.");
-      }
+    }
 
-      const update = req.body;
-      console.log(`📦 Update recibido:`, JSON.stringify(update, null, 2));
+    const update = req.body;
+    console.log(`📦 Update recibido:`, JSON.stringify(update, null, 2));
 
-      // Responder inmediatamente a Telegram para evitar timeouts
-      res.sendStatus(200);
+    // Responder inmediatamente a Telegram para evitar timeouts
+    res.sendStatus(200);
 
-      if (!update.message || !update.message.text) {
+    if (!update.message || !update.message.text) {
         console.log(`ℹ️  Update sin mensaje de texto, puede ser una actualización de otro tipo`);
         return;
-      }
+    }
 
-      try {
+    try {
         const collection = getCollection(clientId);
         const conversationsCollection = getConversationsCollection(clientId);
         const chatId = update.message.chat.id;
@@ -444,36 +453,38 @@ async function startServer() {
 
         // Verificar si la sesión ha expirado por inactividad
         if (userSession && userSession.lastActivity) {
-          const lastActivity = new Date(userSession.lastActivity);
-          const timeDiff = now - lastActivity;
+        const lastActivity = new Date(userSession.lastActivity);
+        const timeDiff = now - lastActivity;
 
-          let dataJson = {
-              "now": now,
-              "lastActivity": lastActivity,
-              "timeDiff (ms)": timeDiff,
-              "SESSION_TIMEOUT (ms)": SESSION_TIMEOUT
-          };
-          console.dir(`⏱️  Verificando timeout de sesión para usuario ${chatId}`);
-          console.dir(dataJson);
+        let dataJson = {
+            "now": now,
+            "lastActivity": lastActivity,
+            "timeDiff (ms)": timeDiff,
+            "SESSION_TIMEOUT (ms)": SESSION_TIMEOUT
+        };
+        console.dir(`⏱️  Verificando timeout de sesión para usuario ${chatId}`);
+        console.dir(dataJson);
 
-
-          if (timeDiff > SESSION_TIMEOUT) {
+        if (timeDiff > SESSION_TIMEOUT) {
             // Reiniciar sesión expirada
             userSession = null;
             await collection.updateOne(
-              { chatId },
-              { $set: { registrationStep: REGISTRATION_STEPS.NONE } }
+            { chatId },
+            { $set: { registrationStep: REGISTRATION_STEPS.NONE } }
             );
 
             // Registrar mensaje de timeout
             await conversationsCollection.insertOne({
-              chatId,
-              message: "Sesión reiniciada por inactividad",
-              sender: ITERATOR.SYSTEM,
-              timestamp: now
+            chatId,
+            message: "Sesión reiniciada por inactividad",
+            sender: ITERATOR.SYSTEM,
+            timestamp: now
             });
-          }
         }
+        }
+
+        // DEBUG: Mostrar el estado actual de la sesión
+        console.log(`🔍 Estado de sesión - Existe: ${!!userSession}, Paso: ${userSession?.registrationStep}, Completado: ${userSession?.registrationStep === REGISTRATION_STEPS.COMPLETED}`);
 
         if (!userSession || userSession.registrationStep !== REGISTRATION_STEPS.COMPLETED) {
         // Si no hay sesión, crear un objeto básico para el proceso de registro
@@ -482,20 +493,24 @@ async function startServer() {
             userName: userName
         };
 
+        console.log(`🔄 Iniciando proceso de registro - Paso actual: ${sessionForRegistration.registrationStep}`);
+
         await handleRegistrationProcess(clientConfig, collection, conversationsCollection, chatId, userName, userMessage, sessionForRegistration);
         return;
         }
 
+        // Si llegamos aquí, el usuario está registrado y podemos procesar el mensaje normal
+        console.log(`✅ Usuario registrado - Procesando mensaje normal`);
 
         // Guardar mensaje del usuario en la conversación
         await conversationsCollection.insertOne({
-          chatId,
-          message: userMessage,
-          sender: ITERATOR.USER,
-          timestamp: now,
-          lastActivity: now,
-          userName: userSession.userName,
-          userEmail: userSession.userEmail
+        chatId,
+        message: userMessage,
+        sender: ITERATOR.USER,
+        timestamp: now,
+        lastActivity: now,
+        userName: userSession.userName,
+        userEmail: userSession.userEmail
         });
 
         // Procesar mensaje normal (usuario ya registrado)
@@ -512,55 +527,55 @@ async function startServer() {
 
         let reply;
         try {
-          const completion = await openai.chat.completions.create({
+        const completion = await openai.chat.completions.create({
             model: process.env.OPENAI_MODEL || "gpt-4o-mini",
             messages: [{ role: "user", content: prompt }],
             max_tokens: 500,
             temperature: 0.7,
-          });
+        });
 
-          reply = completion.choices[0].message.content;
-          console.log(`✅ Respuesta de OpenAI recibida: ${reply.substring(0, 100)}...`);
+        reply = completion.choices[0].message.content;
+        console.log(`✅ Respuesta de OpenAI recibida: ${reply.substring(0, 100)}...`);
         } catch (openaiError) {
-          console.error("❌ Error de OpenAI:", openaiError);
-          reply = "Lo siento, estoy teniendo dificultades para procesar tu solicitud. Por favor, intenta nuevamente.";
+        console.error("❌ Error de OpenAI:", openaiError);
+        reply = "Lo siento, estoy teniendo dificultades para procesar tu solicitud. Por favor, intenta nuevamente.";
         }
 
         // Validar que reply no esté vacío
         if (!reply || reply.trim() === '') {
-          console.error('❌ Error: Respuesta vacía de OpenAI');
-          reply = "Lo siento, no pude generar una respuesta. Por favor, intenta nuevamente.";
+        console.error('❌ Error: Respuesta vacía de OpenAI');
+        reply = "Lo siento, no pude generar una respuesta. Por favor, intenta nuevamente.";
         }
 
         // Guardar respuesta del bot en la conversación
         await conversationsCollection.insertOne({
-          chatId,
-          message: reply,
-          sender: ITERATOR.BOT,
-          timestamp: new Date(),
-          userName: userSession.userName,
-          userEmail: userSession.userEmail
+        chatId,
+        message: reply,
+        sender: ITERATOR.BOT,
+        timestamp: new Date(),
+        userName: userSession.userName,
+        userEmail: userSession.userEmail
         });
 
         // Actualizar última actividad
         await collection.updateOne(
-          { chatId },
-          { $set: { lastActivity: now } }
+        { chatId },
+        { $set: { lastActivity: now } }
         );
 
         // Responder vía Telegram API usando la función mejorada
         await sendTelegramMessage(clientConfig.token, chatId, reply);
 
-      } catch (error) {
+    } catch (error) {
         console.error("❌ Error en el webhook:", error);
         // Intentar enviar un mensaje de error
         try {
-          const chatId = update.message.chat.id;
-          await sendTelegramMessage(clientConfig.token, chatId, "❌ Lo siento, ha ocurrido un error. Por favor, intenta nuevamente.");
+        const chatId = update.message.chat.id;
+        await sendTelegramMessage(clientConfig.token, chatId, "❌ Lo siento, ha ocurrido un error. Por favor, intenta nuevamente.");
         } catch (e) {
-          console.error("Error al enviar mensaje de error:", e);
+        console.error("Error al enviar mensaje de error:", e);
         }
-      }
+    }
     });
 
     // Endpoint para refrescar la configuración de clientes
